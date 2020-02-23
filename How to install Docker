@@ -1,0 +1,46 @@
+First, update your existing list of packages:
+=> sudo apt update
+
+Next, install a few prerequisite packages which let apt use packages over HTTPS:
+=> sudo apt install apt-transport-https ca-certificates curl software-properties-common
+
+Then add the GPG key for the official Docker repository to your system:
+=> curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+Add the Docker repository to APT sources:
+=> sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable"
+
+Next, update the package database with the Docker packages from the newly added repo:
+=> sudo apt update
+
+Make sure you are about to install from the Docker repo instead of the default Ubuntu repo:
+=> apt-cache policy docker-ce
+
+Finally, install Docker:
+=> sudo apt install docker-ce
+
+Docker should now be installed, the daemon started, and the process enabled to start on boot. Check that it’s running:
+=> sudo systemctl status docker
+
+Note:
+catt:
+To view the options available to a specific command, type:
+=> docker docker-subcommand --help
+To view system-wide information about Docker, use:
+=>docker info
+
+Docker containers are built from Docker images. By default, Docker pulls these images from Docker Hub, a Docker registry managed by Docker, the company behind the Docker project. Anyone can host their Docker images on Docker Hub, so most applications and Linux distributions you’ll need will have images hosted there.
+To check whether you can access and download images from Docker Hub, type:
+=>docker run hello-world
+
+=========================
+ install docker-compose
+=========================
+Run this command to download the current stable release of Docker Compose:
+$ sudo curl -L "https://github.com/docker/compose/releases/download/1.25.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+
+Apply executable permissions to the binary:
+$ sudo chmod +x /usr/local/bin/docker-compose
+
+Test the installation.
+$ docker-compose --version
