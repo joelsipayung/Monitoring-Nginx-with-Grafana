@@ -1,0 +1,134 @@
+Bagian 1. Persiapan InfluxDB for Docker
+
+1. Buat User
+$ sudo useradd -rs /bin/false influxdb
+2. Di di directory 'etc' buat folder baru untuk influxDB konfigurasi filenya
+$ sudo mkdir -p /etc/influxdb
+3. Buat konfigurasi file untuk influxDB dan docker. Untuk membuat sebuah konfigurasi file menggunakan docker, jalankan perintah berikut 
+$ docker run --rm influxdb influxd config | sudo tee /etc/influxdb/influxdb.conf > /dev/null
+4. Selanjutnya tetapkan ulang izin folder untuk file yang baru dibuat, karena jika tidak, container tidak dapat berinteraksi dengan dengan benar
+$ sudo chown influxdb:influxdb /etc/influxdb/*
+5. Buat 'lib' folder untuk InfluxDB dan Docker. InfluxDB menyimpan datanya, metadata dan juga WAL (untuk log write-ahead) di folder /var/lib/ influxdb secara default. Jadi konsekuensinya, harus membuat folder ini jika belum ada saat ini.
+$ sudo mkdir -p /var/lib/influxdb
+6.selanjutnya make sure bahwa permissions nya sudah benar di set pada container untuk write pada folder ini
+$ sudo chown influxdb:influxdb /var/lib/influxdb
+7. Membuat initialization scripts pada host. Pertama buat sebuah scripts folder pada host dimana yang diinginkan. Pada case ini, ini akan dibuat di /etc/influxdb
+$ sudo mkdir -p /etc/influxdb/scripts
+Edit file script file pada folder yang baru dibuat,dan make sure bahwa extensionnya '.iql'
+$ sudo touch influxdb-init.iql
+CREATE DATABASE weather;
+CREATE RETENTION POLICY one_week ON weather DURATION 168h REPLICATION 1 DEFAULT;
+-> simple initialization script ini akan membuat sebuah 'database for weather data'
+
+7. Langkah terakhir adalah mempersiapkan folder meta untuk inisialisasi InfluxDB.
+docker run --rm -e INFLUXDB_HTTP_AUTH_ENABLED=true \
+-e INFLUXDB_ADMIN_USER=admin \
+-e INFLUXDB_ADMIN_PASSWORD=admin123 \
+-v /var/lib/influxdb:/var/lib/influxdb \
+-v /etc/influxdb/scripts:/docker-entrypoint-initdb.d \
+influxdb /init-influxdb.sh
+Note : mengatur INFLUXDB_HTTP_AUTH_ENABLED ke true tidak berarti otentikasi diaktifkan pada server InfluxDB. Otentikasi diaktifkan di salah satu bagian berikutnya, parameter ini hanya digunakan untuk skrip inisialisasi.
+
+8. Sebagai langkah verifikasi terakhir, dapat dilakukan dengan memeriksa file meta.db di folder meta untuk memastikan bahwa perubahannya ditulis dengan benar.
+$ cat /var/lib/influxdb/meta/meta.db | grep one_week
+
+Bagian 2. Verifikasi InfluxDB configuration for Docker
+
+1. Pastikan konfigurasi pada folder /etc/influxdb.
+ -> Buka bagian [http] dari konfigurasidan pastikan itu diaktifkan.
+ -> verifikasi bind address nya 8086 secara default
+ -> Ini adalah port yang akan Anda gunakan untuk mengirim beberapa perintah ke database InfluxDB Anda, seperti membuat database atau menambahkan pengguna.
+2. Data, meta and WAL konfigurasi
+-> secara Default, konfigurasi file akan terbentuk saat di bagian pertama. Jadi tidak perlu mengubah apapun. Konfigurasi dapat di cek kebenarannya 
+->	[meta]
+	dir = "/var/lib/influxdb/meta"
+	
+	[data]
+	dir = "/var/lib/influxdb/data"
+	wal-dir = "/var/lib/influxdb/wal"
+
+Jalankan influxDB container pada Docker
+3. Pastikan bahwa tidak ada yang berjalan pada port 8086
+$ sudo netstat -tulpn | grep 8086
+4. find the InfluxDB user ID karena id user influxDB untuk menjalankan container 
+$ cat /etc/passwd | grep influxdb
+influxdb:x:999:998::/var/lib/influxdb:/bin/false
+5. start InfluxDB pada Docker, jalankan dengan perintah berikut
+$ docker run -d -p 8086:8086 --user 999:998 --name=influxdb \
+	-v /etc/influxdb/influxdb.conf:/etc/influxdb/influxdb.conf \
+	-v /var/lib/influxdb:/var/lib/influxdb \
+	influxdb \
+	-config /etc/influxdb/influxdb.conf
+
+Testing InfluxDB container
+6.  Untuk menguji apakah influxDB berjalan dengan benar dan mencek apakah influxDB benar listen pada port 8086 pada host 
+$ curl -G http://localhost:8086/query --data-urlencode "q=SHOW DATABASES"
+$ netstat -tulpn | grep 8086
+
+Create administrator account dengan docker exec
+7. masuk ke docker container influxdb 
+$ docker container ls
+$ docker exec -it <container_id> /bin/bash
+->	$ influx
+	Connected to http://localhost:8086 version 1.7.8
+	InfluxDB shell version: 1.7.8
+	> CREATE USER admin WITH PASSWORD 'admin123' WITH ALL PRIVILEGES
+	> SHOW USERS
+	user  admin
+	----  -----
+	admin true
+8. keluar dari container dan Enable HTTP Authentication pada file konfigurasi 
+$ sudo nano /etc/influxdb/influxdb.conf
+[http]
+  enabled = true
+  bind-address = ":8086"
+  auth-enabled = true
+9. Save file konfigurasi, setelahnya restart docker container influxdb
+$ docker container restart <container_id>
+10. Authentication benar enabled ?
+execute InfluxQL query lagi dengan kredensial
+$ curl -G -u admin:admin123 http://localhost:8086/query --data-urlencode "q=SHOW DATABASES"
+->{"results":[{"statement_id":0,"series":[{"name":"databases","columns":["name"],"values":[["_internal"]]}]}]}
+
+====================================================================================================================================
+
+Prepare Telegraf for InfluxDB and Docker
+1. buat user dan foler untuk konfigurasi file 
+$ sudo useradd -rs /bin/false telegraf
+$ sudo mkdir -p /etc/telegraf
+2. Buat file konfigurasi telegraf menggunakan Docker dengan perintah sebagai berikut :
+$ docker run --rm telegraf telegraf config | sudo tee /etc/telegraf/telegraf.conf > /dev/null
+3. Selanjutnya,reassign permissions pada folder Telegraf
+$ sudo chown telegraf:telegraf /etc/telegraf/*
+4. Edit telegraf file konfigurasi
+	## HTTP Basic Auth
+	username = "admin"
+	password = "admin123"
+Running the Telegraf container on Docker
+5. cek dulu usernya dari telegraf
+$getent passwd | grep telegraf
+->telegraf:x:998:997::/home/telegraf:/bin/false
+6. run docker telegraf
+->	$ docker run -d --user 998:997 --name=telegraf \
+	--net=container:<influx_container_id> \
+	-e HOST_PROC=/host/proc \
+	-v /proc:/host/proc:ro \
+	-v /etc/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro \
+	telegraf
+7. untuk make sure Telegraf instance berjalan dengan baik,jalankan perintah berikut
+$ docker container logs -f --since 10m telegraf
+8. masuk ke container influxdb
+$ docker exec -it <container_id> influx -username admin -password admin123
+9. lihat database apakah telegraf sudah masuk atau tidak
+
+=======================================================================================================================================
+
+1. Untuk membuat Grafana container jalankan peritah berikut
+$ docker run -d --name=grafana -p 3000:3000 grafana/grafana
+2. Pastika grafana telah up dan make sure listening port nya 3000
+$ docker container ls | grep grafana
+$ netstat -tulpn | grep 3000
+3. selanjutnya buka browser http://ipaddr:3000/
+
+========================================================================================================================================
+docker run --name mynginx -p 8000:80 -d nginx
